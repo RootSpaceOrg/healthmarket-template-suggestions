@@ -2,6 +2,11 @@
 """
 Script para gerar sugestões de ideias de marketing e inserir no DynamoDB.
 
+Fonte de contexto dos templates:
+- Busca templates no Supabase via credenciais do Parameter Store
+- Filtra por template_type=ai, status=published e user_id/userId=public
+- Usa o campo description dos templates como contexto para gerar sugestões
+
 Uso:
     python scripts/generate-suggestions.py --count 10
     python scripts/generate-suggestions.py --count 5 --segment odontologia
@@ -12,50 +17,15 @@ import uuid
 import argparse
 from datetime import datetime, timezone
 import random
+import json
+import urllib.parse
+import urllib.request
 
 # Configurações AWS
 AWS_PROFILE = 'healthmarket-prod'
 DYNAMODB_TABLE = 'AIRequestsTable'
 AWS_REGION = 'sa-east-1'
-
-# Templates AI disponíveis (publicados) com descrições completas
-TEMPLATES = [
-    {
-        "id": "KLUsr-oI1xrrs1Q6jZJgs",
-        "name": "Hero/Banner",
-        "type": "hero",
-        "description": "Banner hero em tela cheia com imagem de fundo e sobreposição de texto (título + subtítulo). Ideal para landing pages, comunicação rápida de ofertas ou campanhas.",
-        "elements": ["imagem de fundo", "título destacado", "subtítulo", "CTA"]
-    },
-    {
-        "id": "_RFWfXL-V7hi-EQ5X-gZv",
-        "name": "Post único (imagem + título + parágrafo)",
-        "type": "post",
-        "description": "Layout hero/banner com área de imagem substituível + bloco de conteúdo em duas colunas (texto descritivo + elemento visual). Para apresentar serviços/campanhas e incentivar ação.",
-        "elements": ["imagem principal", "título", "descrição", "elemento visual lateral"]
-    },
-    {
-        "id": "WM42V_UBvD1C9BQc4A_4O",
-        "name": "Texto + parágrafo + Imagem",
-        "type": "landing",
-        "description": "Landing page completa com múltiplas seções: cabeçalho (logo), área hero com título + descrições, bloco de conteúdo auxiliar, cartão de CTA destacado e imagem principal com sobreposição de profissional.",
-        "elements": ["logo", "título hero", "descrições", "bloco conteúdo", "CTA destacado", "imagem profissional"]
-    },
-    {
-        "id": "xkzg3dYYVJCuaW98uUEYq",
-        "name": "Post único (2 imagens + título + 2 textos)",
-        "type": "gallery",
-        "description": "Layout em três níveis: cabeçalho com logo, galeria com duas imagens lado a lado (feature cards) e área de título seguida de blocos de texto. Adequado para comparações, antes/depois ou apresentação de benefícios.",
-        "elements": ["logo", "2 imagens lado a lado", "título destaque", "2 blocos de texto"]
-    },
-    {
-        "id": "nuv0S6gQqTO6vTnYWYz32",
-        "name": "Coluna única",
-        "type": "simple",
-        "description": "Template simples de coluna única com cabeçalho/texto no topo e imagem centralizada como hero. Facilita leitura rápida e foco visual. Ideal para materiais educativos, e-mails ou posts diretos.",
-        "elements": ["cabeçalho/texto", "imagem hero centralizada"]
-    }
-]
+PARAMETER_NAME = 'supabase-database-credentials'
 
 # Copy Tones disponíveis
 COPY_TONES = [
@@ -96,75 +66,152 @@ DEFAULT_IMAGE_LLM = {
     "model": "google/gemini-3-pro-image-preview"
 }
 
-# Ideias detalhadas por tipo de template
-IDEAS_BY_TYPE = {
-    "hero": [
-        "Campanha Janeiro Branco - Banner impactante com fundo em tons de azul/branco mostrando pessoa em meditação, título 'Sua Saúde Mental Importa' em destaque e subtítulo 'Agende sua primeira consulta com 30% de desconto'. CTA 'Fale com um Especialista'",
-        "Outubro Rosa 2026 - Hero em rosa vibrante com imagem de mulheres diversas em abraço solidário, título 'Prevenir é Viver', subtítulo descrevendo pacote completo de exames preventivos. CTA 'Agende Seu Check-up'",
-        "Tecnologia de Ponta Chegou - Fundo tech com gradientes modernos, imagem de equipamento médico inovador, título 'Diagnósticos Mais Precisos em Menos Tempo', subtítulo explicando nova tecnologia disponível. CTA 'Conheça a Novidade'",
-        "Black Friday da Saúde - Banner urgente com cores vibrantes, imagem de profissionais sorrindo, título '48h de Ofertas Imperdíveis', subtítulo com pacotes de exames/consultas com descontos. CTA 'Aproveite Agora'",
-        "Telemedicina 24/7 - Hero minimalista com ilustração de médico em videochamada, título 'Atendimento Online Quando Você Precisar', subtítulo destacando conveniência e qualidade. CTA 'Agende Online'"
-    ],
-    "post": [
-        "Alimentação e Longevidade - Post educativo com imagem de prato colorido e balanceado no topo, título '5 Alimentos que Aumentam sua Expectativa de Vida', parágrafo explicando benefícios de cada um com ícones ilustrativos ao lado",
-        "Postura no Home Office - Imagem principal mostrando setup ergonômico, título 'Dores nas Costas? Pode ser sua Mesa', descrição detalhada sobre ergonomia com ilustração de postura correta/incorreta ao lado",
-        "Hidratação Inteligente - Post com imagem de pessoa bebendo água em ambiente saudável, título 'Você Está Bebendo Água o Suficiente?', texto explicativo com calculadora de necessidade diária e dicas práticas",
-        "Sono de Qualidade - Imagem de quarto relaxante com iluminação suave, título '7 Segredos para Dormir Melhor', descrição com lista de hábitos noturnos e ilustração de ciclo do sono",
-        "Vitamina D e Imunidade - Post com imagem de pessoa tomando sol pela manhã, título 'O Poder da Vitamina D na sua Imunidade', texto educativo sobre importância e fontes com gráfico ilustrativo"
-    ],
-    "landing": [
-        "Clínica de Prevenção Cardiovascular - Landing completa com logo no topo, hero 'Proteja seu Coração', descrição dos serviços (check-up, acompanhamento, exames), bloco sobre equipe especializada, cartão CTA 'Agende Avaliação Gratuita', imagem de cardiologista confiável",
-        "Centro de Estética Avançada - Logo premium, hero 'Beleza Natural com Ciência', descrições de tratamentos (harmonização, peeling, skincare), bloco de resultados/depoimentos, CTA destacado 'Agende Avaliação', foto de profissional em ambiente moderno",
-        "Clínica Odontológica Especializada - Logo clean, hero 'Seu Sorriso Merece o Melhor', descrição de especialidades (implantes, ortodontia, clareamento), bloco sobre tecnologia 3D, CTA 'Primeira Consulta Grátis', imagem de dentista sorridente",
-        "Fisioterapia Personalizada - Logo institucional, hero 'Movimento sem Dor', descrições de modalidades (ortopédica, esportiva, RPG), bloco sobre equipamentos modernos, CTA 'Avaliação Gratuita', foto de fisioterapeuta atendendo",
-        "Nutrição Funcional - Logo clean, hero 'Transforme sua Relação com a Comida', descrição de abordagem personalizada, bloco sobre resultados comprovados, CTA 'Consulte um Especialista', imagem de nutricionista confiante"
-    ],
-    "gallery": [
-        "Antes e Depois Ortodontia - Logo no topo, duas imagens lado a lado mostrando sorriso antes/depois de tratamento, título 'Transformações Reais em 12 Meses', texto 1 explicando processo e texto 2 sobre tecnologia invisível usada",
-        "Comparativo Tratamentos Faciais - Logo, galeria com foto de rosto antes/depois de procedimento estético, título 'Harmonização Facial Natural', bloco 1 descrevendo técnica e bloco 2 sobre durabilidade dos resultados",
-        "Resultados Emagrecimento - Logo, duas fotos de corpo inteiro mostrando evolução de paciente, título 'Perca Peso com Saúde', texto 1 sobre método nutricional e texto 2 sobre acompanhamento multidisciplinar",
-        "Reabilitação Pós-Cirurgia - Logo, imagens mostrando progresso de mobilidade (semana 1 vs 8), título 'Recuperação Completa e Segura', texto 1 sobre protocolo personalizado e texto 2 sobre equipamentos utilizados",
-        "Clareamento Dental Profissional - Logo, galeria antes/depois de sorriso clareado, título 'Dentes Brancos sem Sensibilidade', bloco 1 explicando técnica e bloco 2 sobre manutenção dos resultados"
-    ],
-    "simple": [
-        "Dica Rápida de Saúde - Texto no topo: 'Você sabia que caminhar 30min por dia reduz risco cardíaco em 40%?', imagem centralizada de pessoa caminhando ao ar livre em momento inspirador",
-        "Alerta de Sintoma - Cabeçalho: 'Atenção: dor de cabeça persistente pode ser sinal de hipertensão', imagem hero de pessoa medindo pressão com profissional, design clean e direto",
-        "Promoção Relâmpago - Texto simples: 'Hoje: Consulta + Exames por R$150', imagem centralizada de profissional atendendo com sorriso, foco na oferta urgente",
-        "Conquista da Clínica - Cabeçalho: 'Atingimos 10.000 vidas transformadas!', imagem hero de equipe comemorando ou pacientes felizes, mensagem de gratidão e convite",
-        "Post Motivacional - Texto: 'Pequenas mudanças geram grandes resultados. Comece hoje!', imagem inspiradora de pessoa superando desafio de saúde, mensagem positiva e encorajadora"
-    ]
+BUSINESS_TYPE_BY_SEGMENT = {
+    'medicos': 'medical-clinic',
+    'laboratorios': 'laboratory',
+    'farmacias': 'pharmacy',
+    'nutricao': 'nutrition',
+    'fisioterapia': 'physiotherapy',
+    'psicologia': 'psychology',
+    'odontologia': 'dentistry',
+    'estetica': 'aesthetics',
+    'laserterapia': 'laserterapy',
+    'laserterapy': 'laserterapy',
+    'generico': '',
+    'genérico': '',
+    'generic': '',
 }
 
-def generate_idea(template_type):
-    """Gera uma ideia detalhada baseada no tipo de template"""
-    ideas = IDEAS_BY_TYPE.get(template_type, IDEAS_BY_TYPE["simple"])
-    return random.choice(ideas)
+def load_supabase_credentials(session):
+    """Carrega credenciais do Supabase a partir do Parameter Store."""
+    ssm = session.client('ssm', region_name=AWS_REGION)
+    response = ssm.get_parameter(Name=PARAMETER_NAME, WithDecryption=True)
+    raw_value = response['Parameter']['Value']
 
-def generate_suggestion_item(segment=None):
+    try:
+        data = json.loads(raw_value)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"Parametro '{PARAMETER_NAME}' nao contem JSON valido"
+        ) from exc
+
+    url = data.get('url') or data.get('supabaseUrl') or data.get('SUPABASE_URL')
+    api_key = (
+        data.get('key')
+        or data.get('anonKey')
+        or data.get('publishableKey')
+        or data.get('apiKey')
+        or data.get('SUPABASE_ANON_KEY')
+        or data.get('SUPABASE_PUBLISHABLE_KEY')
+    )
+
+    if not url or not api_key:
+        raise RuntimeError(
+            f"Credenciais incompletas em '{PARAMETER_NAME}' (url/api key ausentes)"
+        )
+
+    return url.rstrip('/'), api_key
+
+
+def fetch_templates_from_supabase(supabase_url, api_key):
+    """Busca templates e aplica filtros exigidos (ai/published/public)."""
+    base_url = f"{supabase_url}/rest/v1/templates"
+
+    query = {
+        'select': '*',
+        'template_type': 'eq.ai',
+        'status': 'eq.published'
+    }
+
+    headers = {
+        'apikey': api_key,
+        'Authorization': f'Bearer {api_key}',
+        'Accept': 'application/json'
+    }
+
+    request_url = f"{base_url}?{urllib.parse.urlencode(query)}"
+    req = urllib.request.Request(request_url, headers=headers, method='GET')
+
+    try:
+        with urllib.request.urlopen(req, timeout=30) as res:
+            payload = json.loads(res.read().decode('utf-8'))
+    except Exception as exc:
+        raise RuntimeError(f'Erro ao buscar templates no Supabase: {exc}') from exc
+
+    if not isinstance(payload, list):
+        raise RuntimeError('Resposta inesperada do Supabase ao buscar templates')
+
+    filtered = []
+    for t in payload:
+        uid = t.get('user_id', t.get('userId'))
+        if uid != 'public':
+            continue
+        if not t.get('description'):
+            continue
+        if not t.get('id'):
+            continue
+        filtered.append({
+            'id': t.get('id'),
+            'name': t.get('name') or 'Template sem nome',
+            'description': str(t.get('description')).strip(),
+        })
+
+    if not filtered:
+        raise RuntimeError(
+            'Nenhum template encontrado no Supabase com filtros '
+            '(template_type=ai, status=published, user_id/userId=public).'
+        )
+
+    return filtered
+
+
+def build_idea_from_template(template, segment=None):
+    """Gera ideia usando description do template como contexto principal."""
+    theme = random.choice([
+        'educativo', 'promocional', 'institucional', 'sazonal', 'prova social'
+    ])
+    cta = random.choice([
+        'Agende sua avaliação',
+        'Fale com a equipe no WhatsApp',
+        'Salve este post para consultar depois',
+        'Compartilhe com quem precisa'
+    ])
+
+    segment_prefix = f"[{segment.title()}] " if segment else ""
+    description = template['description'].replace('\n', ' ').strip()
+
+    return (
+        f"{segment_prefix}Crie um conteúdo para Instagram no tema {theme}, "
+        f"aproveitando a estrutura do template '{template['name']}'. "
+        f"Contexto visual/estrutural do template: {description}. "
+        f"Inclua título forte, texto principal objetivo, elemento de prova social "
+        f"(dado/depoimento) e CTA final: '{cta}'."
+    )
+
+def generate_suggestion_item(template, segment=None):
     """Gera um item de sugestão completo"""
     now = datetime.now(timezone.utc).isoformat()
-    
+
     # Seleciona valores aleatórios
-    template = random.choice(TEMPLATES)
     copy_tone = random.choice(COPY_TONES)
     visual_style = random.choice(VISUAL_STYLES)
-    
+
     # Gera ideia baseada no tipo de template
-    idea = generate_idea(template['type'])
-    
-    # Adiciona contexto de segmento na ideia se especificado
+    idea = build_idea_from_template(template, segment)
+
+    business_type = ''
     if segment:
-        idea = f"[{segment.title()}] {idea}"
-    
+        business_type = BUSINESS_TYPE_BY_SEGMENT.get(segment.strip().lower(), '')
+
     item = {
         'requestId': str(uuid.uuid4()),
         'idea': idea,
         'templateId': template['id'],
-        'businessType': '',  # Vazio para ideias genéricas
+        'businessType': business_type,  # Vazio para templates genéricos
         'copyTone': copy_tone,
         'imageStyle': visual_style,
         'status': 'waiting',
-        'createdBy': 'Sugestão AI',
+        'createdBy': 'Sugestão AI (Supabase Context)',
         'createdAt': now,
         'updatedAt': now,
         'copyLLM': DEFAULT_COPY_LLM,
@@ -183,20 +230,25 @@ def insert_suggestions(count, segment=None, dry_run=False):
     session = boto3.Session(profile_name=AWS_PROFILE, region_name=AWS_REGION)
     dynamodb = session.resource('dynamodb')
     table = dynamodb.Table(DYNAMODB_TABLE)
+
+    supabase_url, supabase_api_key = load_supabase_credentials(session)
+    templates = fetch_templates_from_supabase(supabase_url, supabase_api_key)
     
     suggestions = []
     
     print(f"Gerando {count} sugestoes...")
+    print(f"Templates Supabase carregados: {len(templates)}")
     if segment:
         print(f"Segmento: {segment}")
     
     for i in range(count):
-        item = generate_suggestion_item(segment)
+        selected_template = random.choice(templates)
+        item = generate_suggestion_item(selected_template, segment)
         suggestions.append(item)
         
         print(f"\n[{i+1}/{count}] {item['requestId'][:8]}...")
         print(f"  Ideia: {item['idea'][:60]}...")
-        print(f"  Template: {next(t['name'] for t in TEMPLATES if t['id'] == item['templateId'])}")
+        print(f"  Template: {selected_template['name']}")
         print(f"  Tone: {item['copyTone']} | Style: {item['imageStyle']}")
     
     if dry_run:
@@ -216,7 +268,14 @@ def insert_suggestions(count, segment=None, dry_run=False):
 def main():
     parser = argparse.ArgumentParser(description='Gera sugestões de ideias de marketing para HealthMarket')
     parser.add_argument('--count', type=int, required=True, help='Quantidade de sugestões a gerar')
-    parser.add_argument('--segment', type=str, help='Segmento específico (ex: odontologia, nutrição)')
+    parser.add_argument(
+        '--segment',
+        type=str,
+        help=(
+            'Segmento (odontologia, medicos, nutricao, fisioterapia, psicologia, '
+            'estetica, farmacias, laboratorios, laserterapia, generico)'
+        )
+    )
     parser.add_argument('--dry-run', action='store_true', help='Simula sem inserir no DynamoDB')
     
     args = parser.parse_args()

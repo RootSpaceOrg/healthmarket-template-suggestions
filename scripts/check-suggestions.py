@@ -14,7 +14,7 @@ table = dynamodb.Table(DYNAMODB_TABLE)
 
 # Query com filtro
 response = table.scan(
-    FilterExpression=Attr('createdBy').eq('Sugestão AI'),
+    FilterExpression=Attr('createdBy').begins_with('Sugestão AI'),
     Limit=10
 )
 

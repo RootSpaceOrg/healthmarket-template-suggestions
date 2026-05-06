@@ -1,6 +1,6 @@
 ---
 name: template-ideas-generator
-description: Generate and manage template ideas for health market segments (odontologia, médicos, nutrição, fisioterapia, psicologia, estética, farmácias, laboratórios) by inserting ideas into DynamoDB AIRequestsTable. Use when needing to create batch template ideas, manage segment-specific suggestions, populate the ideas database, or check existing ideas.
+description: Generate and manage template ideas for health market segments (odontologia, médicos, nutrição, fisioterapia, psicologia, estética, farmácias, laboratórios, laserterapia e genérico) by inserting ideas into DynamoDB AIRequestsTable. Use when needing to create batch template ideas, manage segment-specific suggestions, populate the ideas database, or check existing ideas.
 ---
 
 # Template Ideas Generator
@@ -15,7 +15,7 @@ Generate and insert template ideas for health market segments into DynamoDB's AI
 python scripts/insert-segment-ideas.py
 ```
 
-Inserts 16 carefully crafted ideas covering 8 health segments:
+Inserts segment ideas for valid health segments:
 - 🦷 Odontologia
 - 🏥 Médicos
 - 🥗 Nutrição
@@ -24,14 +24,22 @@ Inserts 16 carefully crafted ideas covering 8 health segments:
 - 💆 Estética
 - 💊 Farmácias
 - 🔬 Laboratórios
+- ⚡ Laserterapia
+- 🧩 Genérico (sem `businessType`)
 
-### Generate Random Generic Ideas
+### Generate Contextual Ideas from Supabase Templates
 
 ```bash
 python scripts/generate-suggestions.py --count 10
 ```
 
-Creates N random ideas from a pool of generic templates.
+Creates N ideas using real template context from Supabase (`description` field), filtered by:
+- `template_type == ai`
+- `status == published`
+- `user_id/userId == public`
+
+Supabase credentials are loaded from AWS SSM Parameter Store parameter:
+- `supabase-database-credentials`
 
 ### Check Existing Ideas
 
@@ -83,10 +91,11 @@ Inserts 16 segment-specific ideas (2 per segment).
 
 ### generate-suggestions.py
 
-Generates N random generic ideas.
+Generates N contextual ideas based on template descriptions fetched from Supabase.
 
 **Options:**
 - `--count N` - Number of ideas (default: 5)
+- `--segment SEGMENT` - Segmento válido: `odontologia | medicos | nutricao | fisioterapia | psicologia | estetica | farmacias | laboratorios | laserterapia | generico`
 - `--dry-run` - Preview without inserting
 - `--profile PROFILE` - AWS CLI profile
 
@@ -162,18 +171,22 @@ Each idea is inserted into `AIRequestsTable` with:
 - **[dynamodb-schema.md](references/dynamodb-schema.md)** - Complete AIRequestsTable schema
 - **[segment-ideas.md](references/segment-ideas.md)** - All 16 segment ideas with details
 
-## Workflow
+## End-to-End Workflow (com inserção no Dynamo)
 
 ```
-Script Inserts → status: waiting → Backend Processes → Template Generated → status: completed
+Supabase (templates ai+published+public) → generate-suggestions.py → AIRequestsTable(status=waiting) → Backend pipeline → status=completed|failed
 ```
 
 **Processing:**
-1. Scripts insert ideas with `status: waiting`
-2. Backend system picks up waiting items
-3. Generates template using AI (copy + image)
-4. Updates with `generatedTemplateId` + `status: completed`
-5. On error: updates `error` field + `status: failed`
+1. `generate-suggestions.py` lê credenciais do SSM (`supabase-database-credentials`)
+2. Busca templates no Supabase com filtros:
+   - `template_type == ai`
+   - `status == published`
+   - `user_id/userId == public`
+3. Usa `description` do template como contexto da ideia gerada
+4. Insere item na `AIRequestsTable` com `status: waiting`
+5. Backend processa e atualiza `generatedTemplateId` + `status`
+6. Em erro, preenche `error` + `status: failed`
 
 ## Tips
 
@@ -182,8 +195,8 @@ Script Inserts → status: waiting → Backend Processes → Template Generated 
 # Only segment ideas
 FilterExpression=Attr('createdBy').eq('Ideias Segmentadas 2x8')
 
-# Only generic ideas
-FilterExpression=Attr('createdBy').begins_with('Sugestões Genéricas')
+# Only generic/contextual ideas
+FilterExpression=Attr('createdBy').begins_with('Sugestão AI')
 ```
 
 **Dry-run first:**
