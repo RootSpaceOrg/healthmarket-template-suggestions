@@ -93,6 +93,17 @@ Inserts 16 segment-specific ideas (2 per segment).
 
 Generates N contextual ideas based on template descriptions fetched from Supabase.
 
+**Mandatory source context (current flow):**
+- Read Supabase credentials from AWS SSM Parameter Store:
+  - Parameter name: `supabase-database-credentials`
+  - Expected JSON keys: `url` and `key` (fallbacks accepted by script: `supabaseUrl`, `SUPABASE_URL`, `anonKey`, `publishableKey`, `apiKey`)
+- Query Supabase table `templates` with:
+  - `template_type == ai`
+  - `status == published`
+  - `user_id/userId == public`
+- Use template `description` as generation context in `idea`
+- Insert output into DynamoDB `AIRequestsTable` with `status: waiting`
+
 **Options:**
 - `--count N` - Number of ideas (default: 5)
 - `--segment SEGMENT` - Segmento válido: `odontologia | medicos | nutricao | fisioterapia | psicologia | estetica | farmacias | laboratorios | laserterapia | generico`
@@ -179,11 +190,11 @@ Supabase (templates ai+published+public) → generate-suggestions.py → AIReque
 
 **Processing:**
 1. `generate-suggestions.py` lê credenciais do SSM (`supabase-database-credentials`)
-2. Busca templates no Supabase com filtros:
+2. Busca templates no Supabase (tabela `templates`) com filtros obrigatórios:
    - `template_type == ai`
    - `status == published`
    - `user_id/userId == public`
-3. Usa `description` do template como contexto da ideia gerada
+3. Usa `description` de cada template como contexto obrigatório da ideia gerada
 4. Insere item na `AIRequestsTable` com `status: waiting`
 5. Backend processa e atualiza `generatedTemplateId` + `status`
 6. Em erro, preenche `error` + `status: failed`
