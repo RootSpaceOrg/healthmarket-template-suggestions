@@ -104,16 +104,32 @@ manualmente, use `--all`.
 > Os templates AI publicados sao majoritariamente multi-nicho (scope=platform). Voce vai
 > **especializar** a copy para o assunto/businessType pedido, mantendo o templateId base.
 
-### Passo 3 — Escrever a copy (VOCE, a IA)
+### Passo 3 — Escrever o `idea` (VOCE, a IA)
 
-Para cada uma das N sugestoes, escreva uma `idea` — a copy final que orienta a geracao do
-template novo. Cada `idea` deve conter, no idioma do usuario:
+> **Importante — o que e o `idea`.** A Lambda `ai-idea-to-template` consome o `idea` como
+> **brief de campanha**, NAO como a copy final dos slides. Ela mesma escreve a copy de cada
+> elemento (titulo, corpo, CTA, descricao de imagem) a partir do `idea` + `copyTone` +
+> `businessType` + descricao do template base. Entao o `idea` deve dar **direcao**, nao texto
+> literal slide-a-slide. (Ver `Lambda/mkt-platform-lambda-ai-idea-to-template/app/Utils/prompt_templates.py`.)
 
-- **Tema/angulo** especifico do assunto + businessType (ex: "beneficios da laserterapia para dor cronica").
-- **Estrutura sugerida** alinhada ao template base (use a `description` do base como guia de arco/slides).
-- **Titulo forte (hook)** para o primeiro slide.
-- **Corpo objetivo** + 1 elemento de prova/credibilidade quando fizer sentido.
-- **CTA final** apropriado ao tenant (ex: "Agende sua avaliacao", "Salve este post", "Fale no WhatsApp").
+Para cada uma das N sugestoes, escreva um `idea` que funcione como brief. Inclua, no idioma do usuario:
+
+- **Angulo unico** da campanha — o que diferencia esta peca de qualquer concorrente do mesmo
+  segmento. (ex: "laserterapia para dor cronica em quem ja tentou fisioterapia sem resultado").
+- **Audiencia especifica** — nunca "todos"/"para voce". (ex: "adultos 40+ com dor lombar persistente").
+- **Beneficio concreto/mensuravel** — nao adjetivo vago. (ex: "reducao de dor ja nas primeiras sessoes").
+- **Hook do slide 1** — pergunta provocativa, numero, contradicao que pare o scroll.
+- **Specifics a referenciar** — 2-3 elementos concretos (numero, prazo, cenario cotidiano, objecao comum).
+- **Direcao do arco** alinhada a `description` do template base (ex: formato antes/depois em 4 slides).
+- **CTA pretendido** — especifico, ligado ao servico (ex: "agendar avaliacao"). NAO use CTA generico.
+
+**NAO faca no `idea`:**
+- Nao escreva a copy final palavra-por-palavra de cada slide — isso e trabalho da Lambda.
+- Nao use clichês/frases proibidas (a Lambda **rejeita automaticamente**): "aproveite", "saiba mais",
+  "clique aqui", "nao perca", "o melhor do mercado", "qualidade incomparavel", "para voce",
+  "venha conhecer", "a solucao perfeita", "feito sob medida", etc.
+- Nao repita o `businessType` a exaustao — ele ja entra dinamicamente na Lambda.
+- Nao inclua emoji (a Lambda so usa emoji se o elemento pedir explicitamente).
 
 Escolha `copyTone` e `imageStyle` coerentes (listas validas abaixo). **Varie** entre as N sugestoes
 — nao repita o mesmo tom/estilo/angulo em todas.
@@ -233,8 +249,10 @@ pip install boto3
 
 ## Referencias
 
+- [`references/idea-format.md`](references/idea-format.md) — **como escrever o `idea`**: a Lambda consumidora trata como brief, regras anti-AI-slop e frases proibidas.
 - [`references/airequests-schema.md`](references/airequests-schema.md) — schema completo da `AIRequestsTable` e o que o frontend le.
 - [`references/tenant-resolution.md`](references/tenant-resolution.md) — estrutura do `tenantConfig`, businessTypes e formato do adminLink.
+- [`references/iam-setup.md`](references/iam-setup.md) — roles `TemplateSuggesterRole`, trust e policy.
 
 ## Fluxo end-to-end
 
