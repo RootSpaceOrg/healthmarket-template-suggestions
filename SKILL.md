@@ -174,8 +174,9 @@ preenchidos (sem eles o item nao aparece no frontend), `createdAt`/`updatedAt` e
 ### Passo 5 — Reportar ao usuario
 
 Responda com um resumo consolidado: N sugestoes criadas, o businessType resolvido, os
-`requestId`s gerados, e onde revisar (tela request-workflow / fila "waiting"). Se algum passo
-parou (exit 2/3/4), explique e devolva o `adminLink`.
+`requestId`s gerados, e onde revisar (`https://{domain}/processar-solicitacoes`). Se algum passo
+parou (exit 2/3/4), explique.
+
 
 ## Defaults de gravacao
 
