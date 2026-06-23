@@ -64,19 +64,39 @@ DEFAULT_COPY_LLM = {
     "model": "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
     "imageQuality": None,
 }
+# OpenAI direct (Images API) — quality="low" actually reduces cost here.
+# OpenRouter's chat-completions route ignored the quality knob and always
+# billed gpt-image at high tier (~$0.22/img); direct low is ~$0.008/img.
 DEFAULT_IMAGE_LLM = {
-    "provider": "openrouter",
-    "model": "openai/gpt-5.4-image-2",
+    "provider": "openai",
+    "model": "gpt-image-2",
     "imageQuality": "low",
 }
 
 VALID_TONES = {
-    "formal", "casual", "educativo", "inspiracional", "autoritativo",
-    "empatico", "urgente", "divertido", "storytelling", "minimalista",
+    "formal",
+    "casual",
+    "educativo",
+    "inspiracional",
+    "autoritativo",
+    "empatico",
+    "urgente",
+    "divertido",
+    "storytelling",
+    "minimalista",
 }
+
 VALID_STYLES = {
-    "fotorrealista", "ilustracao", "minimalista", "corporativo", "bold_vibrante",
-    "flat_design", "moderno_tech", "organico_natural", "elegante_premium", "energetico",
+    "fotorrealista",
+    "ilustracao",
+    "minimalista",
+    "corporativo",
+    "bold_vibrante",
+    "flat_design",
+    "moderno_tech",
+    "organico_natural",
+    "elegante_premium",
+    "energetico",
 }
 
 
@@ -125,7 +145,9 @@ def build_authorizer(payload):
     tenant_id = payload.get("tenantId")
     vertical_id = payload.get("verticalId")
     if not tenant_id or not vertical_id:
-        _fail("tenantId e verticalId sao obrigatorios (item ficaria invisivel no frontend)")
+        _fail(
+            "tenantId e verticalId sao obrigatorios (item ficaria invisivel no frontend)"
+        )
 
     owner_user_id = payload.get("ownerUserId") or ""
     if not owner_user_id:
@@ -158,14 +180,21 @@ def main():
         description="Insere sugestoes via Lambda ai-requests-manager (POST /ai_requests)"
     )
     ap.add_argument("--input", help="arquivo JSON de entrada (default: stdin)")
-    ap.add_argument("--env", default="prod", choices=["prod", "dev"], help="ambiente AWS (default: prod)")
-    ap.add_argument("--dry-run", action="store_true", help="preview sem invocar a Lambda")
+    ap.add_argument(
+        "--env",
+        default="prod",
+        choices=["prod", "dev"],
+        help="ambiente AWS (default: prod)",
+    )
+    ap.add_argument(
+        "--dry-run", action="store_true", help="preview sem invocar a Lambda"
+    )
     ap.add_argument(
         "--no-execute",
         dest="execute",
         action="store_false",
         help="cria as requests sem disparar a geracao (executeOnCreate=false). "
-             "Default: executeOnCreate=true (dispara idea-to-brief)",
+        "Default: executeOnCreate=true (dispara idea-to-brief)",
     )
     ap.set_defaults(execute=True)
     args = ap.parse_args()
@@ -189,13 +218,19 @@ def main():
     event = build_event(items, authorizer, args.execute)
 
     print(f"Ambiente: {args.env} | lambda: {LAMBDA_FUNCTION}")
-    print(f"executeOnCreate: {args.execute} (status inicial: "
-          f"{'planning -> plan_review' if args.execute else 'waiting'})")
-    print(f"tenant: {authorizer['tenantId']}/{authorizer['verticalId']} | user: {authorizer['userId']}")
+    print(
+        f"executeOnCreate: {args.execute} (status inicial: "
+        f"{'planning -> plan_review' if args.execute else 'waiting'})"
+    )
+    print(
+        f"tenant: {authorizer['tenantId']}/{authorizer['verticalId']} | user: {authorizer['userId']}"
+    )
     print(f"Sugestoes a inserir: {len(items)}")
     for i, it in enumerate(items, 1):
-        print(f"  [{i}/{len(items)}] bt={it['businessType']!r} "
-              f"| tone={it['copyTone']} | style={it['imageStyle']} | base={it['templateId']}")
+        print(
+            f"  [{i}/{len(items)}] bt={it['businessType']!r} "
+            f"| tone={it['copyTone']} | style={it['imageStyle']} | base={it['templateId']}"
+        )
         print(f"        idea: {it['idea'][:90]}...")
 
     if args.dry_run:
@@ -233,8 +268,10 @@ def main():
 
     created = (body or {}).get("requests", [])
     request_ids = [r.get("requestId") for r in created if isinstance(r, dict)]
-    print(f"\nOK - {len(request_ids)} sugestoes criadas. "
-          f"{(body or {}).get('message', '')}")
+    print(
+        f"\nOK - {len(request_ids)} sugestoes criadas. "
+        f"{(body or {}).get('message', '')}"
+    )
     if request_ids:
         print("requestIds:", ", ".join(rid for rid in request_ids if rid))
 
